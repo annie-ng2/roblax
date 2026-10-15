@@ -1,0 +1,409 @@
+/* Block puzzle. Every class carries a bp- prefix so it cannot clash with global styles.
+   Board size comes from the viewport in both orientations, and every cell is 1/10 of the
+   measured grid, so the floating piece, preview and board share one pitch. */
+
+.bp-page {
+  --gap: 12px;
+  --header: 52px;
+  /* Portrait: header, board, then a row of three slots (≈ a third of the board) and a hint. */
+  --board: min(100vw - 32px, (100dvh - 150px) / 1.36, 560px);
+  --slot: calc((var(--board) - 2 * var(--gap)) / 3);
+
+  position: relative;
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  color: #e2e8f0;
+  background:
+    radial-gradient(60rem 40rem at 10% -10%, rgb(99 102 241 / 0.35), transparent 60%),
+    radial-gradient(50rem 40rem at 110% 110%, rgb(236 72 153 / 0.25), transparent 60%),
+    #0b1026;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  overflow-x: hidden;
+}
+
+@media (orientation: landscape) {
+  .bp-page {
+    /* Landscape: header above the board, the three slots in a column to its right. */
+    --board: min(100dvh - var(--header) - 48px, (100vw - 72px) / 1.38, 680px);
+    --slot: calc((var(--board) - 2 * var(--gap) - 40px) / 3);
+  }
+}
+
+.bp-dragging {
+  cursor: grabbing;
+  touch-action: none;
+}
+
+.bp-layout {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+@media (orientation: landscape) {
+  .bp-layout {
+    flex-direction: row;
+    align-items: flex-end;
+    gap: 24px;
+  }
+}
+
+.bp-boardColumn {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: var(--board);
+}
+
+.bp-header {
+  height: var(--header);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+
+.bp-stat {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+  min-width: 64px;
+}
+.bp-statLabel {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+.bp-statValue {
+  font-size: 24px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  background: linear-gradient(90deg, #fde68a, #f9a8d4);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.bp-restart,
+.bp-primary {
+  margin-left: auto;
+  padding: 10px 16px;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 600;
+  color: white;
+  background: linear-gradient(135deg, #6366f1, #a855f7);
+  box-shadow: 0 6px 20px rgb(99 102 241 / 0.35);
+  transition: transform 0.15s, box-shadow 0.15s;
+  cursor: pointer;
+}
+.bp-restart:hover,
+.bp-primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 24px rgb(99 102 241 / 0.5);
+}
+.bp-restart:focus-visible,
+.bp-primary:focus-visible,
+.bp-piece:focus-visible {
+  outline: 3px solid #fde68a;
+  outline-offset: 3px;
+}
+.bp-primary {
+  margin: 8px 0 0;
+  padding: 12px 24px;
+  font-size: 16px;
+}
+
+.bp-board {
+  position: relative;
+  box-sizing: border-box;
+  width: var(--board);
+  height: var(--board);
+  padding: calc(var(--board) * 0.018);
+  border-radius: calc(var(--board) * 0.04);
+  background: rgb(15 23 42 / 0.65);
+  border: 1px solid rgb(255 255 255 / 0.1);
+  box-shadow:
+    0 24px 60px rgb(0 0 0 / 0.45),
+    inset 0 1px 0 rgb(255 255 255 / 0.06);
+  backdrop-filter: blur(8px);
+}
+
+.bp-grid {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: grid;
+  grid-template-columns: repeat(10, 1fr);
+  grid-template-rows: repeat(10, 1fr);
+}
+
+.bp-cell {
+  position: relative;
+}
+.bp-cell::before {
+  content: "";
+  position: absolute;
+  inset: 5%;
+  border-radius: 22%;
+  background: rgb(255 255 255 / 0.045);
+  box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.35);
+}
+
+/* A coloured block. Shared by board cells, tray pieces, the floating piece and flashes. */
+.bp-tile {
+  position: absolute;
+  inset: 5%;
+  border-radius: 22%;
+  background: linear-gradient(
+    150deg,
+    color-mix(in oklab, var(--c) 65%, white) 0%,
+    var(--c) 50%,
+    color-mix(in oklab, var(--c) 72%, black) 100%
+  );
+  box-shadow:
+    inset 0 -2px 0 rgb(0 0 0 / 0.2),
+    inset 0 2px 0 rgb(255 255 255 / 0.35),
+    0 2px 8px color-mix(in oklab, var(--c) 40%, transparent);
+}
+
+.bp-filled .bp-tile {
+  animation: bp-pop 0.18s ease-out;
+}
+
+.bp-ghost .bp-tile {
+  opacity: 0.42;
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--c) 70%, white) inset;
+  animation: none;
+}
+
+/* Preview that does not fit: tint the overlapping cells red. */
+.bp-blocked .bp-tile {
+  opacity: 0.3;
+}
+.bp-blocked::after {
+  content: "";
+  position: absolute;
+  inset: 5%;
+  border-radius: 22%;
+  background: rgb(239 68 68 / 0.4);
+  box-shadow: inset 0 0 0 2px #f87171;
+}
+.bp-filled.bp-blocked .bp-tile {
+  opacity: 1;
+}
+
+/* Cells that the current preview would clear. */
+.bp-willClear .bp-tile {
+  filter: brightness(1.25) saturate(1.2);
+  box-shadow:
+    0 0 0 2px rgb(255 255 255 / 0.85) inset,
+    0 0 14px color-mix(in oklab, var(--c) 80%, white);
+}
+.bp-willClear.bp-ghost .bp-tile {
+  opacity: 0.75;
+}
+
+.bp-flash {
+  position: absolute;
+  width: 10%;
+  height: 10%;
+  pointer-events: none;
+  animation: bp-vanish 0.45s ease-in forwards;
+}
+.bp-flash::after {
+  content: "";
+  position: absolute;
+  inset: 5%;
+  border-radius: 22%;
+  background: color-mix(in oklab, var(--c) 40%, white);
+  box-shadow: 0 0 18px var(--c);
+}
+
+.bp-popup {
+  position: absolute;
+  z-index: 5;
+  transform: translate(-50%, -50%);
+  white-space: nowrap;
+  pointer-events: none;
+  font-weight: 800;
+  font-size: calc(var(--board) * 0.045);
+  color: white;
+  text-shadow:
+    0 2px 10px rgb(168 85 247 / 0.9),
+    0 0 2px rgb(0 0 0 / 0.6);
+  animation: bp-rise 0.9s ease-out forwards;
+}
+
+.bp-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  text-align: center;
+  border-radius: inherit;
+  background: rgb(11 16 38 / 0.78);
+  backdrop-filter: blur(6px);
+  animation: bp-fade 0.25s ease-out;
+}
+.bp-overlay h2 {
+  font-size: 26px;
+  font-weight: 800;
+}
+.bp-overlay strong {
+  font-size: 20px;
+  color: #fde68a;
+}
+.bp-record {
+  color: #f9a8d4;
+  font-weight: 600;
+}
+
+.bp-tray {
+  display: grid;
+  grid-template-columns: repeat(3, var(--slot));
+  gap: var(--gap);
+}
+@media (orientation: landscape) {
+  .bp-tray {
+    grid-template-columns: var(--slot);
+    grid-template-rows: repeat(3, var(--slot)) auto;
+  }
+}
+
+.bp-slot {
+  display: grid;
+  place-items: center;
+  width: var(--slot);
+  height: var(--slot);
+  border-radius: 18px;
+  background: rgb(255 255 255 / 0.04);
+  border: 1px dashed rgb(255 255 255 / 0.1);
+}
+
+.bp-piece {
+  --mini: calc(var(--slot) / 5);
+  display: grid;
+  grid-template-columns: repeat(var(--cols), var(--mini));
+  grid-template-rows: repeat(var(--rows), var(--mini));
+  padding: 6px;
+  border-radius: 12px;
+  cursor: grab;
+  touch-action: none;
+  transition:
+    transform 0.15s ease,
+    opacity 0.15s ease;
+}
+.bp-piece:hover {
+  transform: scale(1.06);
+}
+.bp-miniCell {
+  position: relative;
+}
+
+/* Being dragged: leave a faint outline in the slot so the player sees where it returns. */
+.bp-lifted {
+  opacity: 0.22;
+  transform: none;
+}
+.bp-selected {
+  opacity: 1;
+  outline: 3px solid #fde68a;
+  outline-offset: 3px;
+}
+.bp-unusable {
+  cursor: not-allowed;
+  filter: grayscale(1);
+  opacity: 0.35;
+}
+.bp-unusable:hover {
+  transform: none;
+}
+
+.bp-hint {
+  grid-column: 1 / -1;
+  font-size: 12px;
+  text-align: center;
+  color: #94a3b8;
+}
+@media (orientation: landscape) {
+  .bp-hint {
+    max-width: var(--slot);
+    line-height: 1.3;
+  }
+}
+
+.bp-floating {
+  position: fixed;
+  z-index: 50;
+  pointer-events: none;
+  filter: drop-shadow(0 12px 18px rgb(0 0 0 / 0.45));
+}
+.bp-floatCell {
+  position: absolute;
+}
+
+.bp-srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@keyframes bp-pop {
+  from {
+    transform: scale(0.7);
+  }
+  to {
+    transform: scale(1);
+  }
+}
+@keyframes bp-vanish {
+  to {
+    transform: scale(1.35);
+    opacity: 0;
+  }
+}
+@keyframes bp-rise {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -20%) scale(0.8);
+  }
+  20% {
+    opacity: 1;
+    transform: translate(-50%, -60%) scale(1.05);
+  }
+  to {
+    opacity: 0;
+    transform: translate(-50%, -160%) scale(1);
+  }
+}
+@keyframes bp-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bp-filled .bp-tile,
+  .bp-flash,
+  .bp-popup,
+  .bp-overlay {
+    animation-duration: 0.01s;
+  }
+  .bp-piece {
+    transition: none;
+  }
+}
